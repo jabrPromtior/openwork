@@ -1,26 +1,27 @@
-import { useEffect, useState, useMemo } from 'react'
-import { Loader2, AlertCircle, FileCode } from 'lucide-react'
-import { useAppStore } from '@/lib/store'
-import { getFileType, isBinaryFile } from '@/lib/file-types'
-import { CodeViewer } from './CodeViewer'
-import { ImageViewer } from './ImageViewer'
-import { MediaViewer } from './MediaViewer'
-import { PDFViewer } from './PDFViewer'
-import { BinaryFileViewer } from './BinaryFileViewer'
+import { useEffect, useState, useMemo } from "react"
+import { Loader2, AlertCircle, FileCode } from "lucide-react"
+import { useCurrentThread } from "@/lib/thread-context"
+import { getFileType, isBinaryFile } from "@/lib/file-types"
+import { CodeViewer } from "./CodeViewer"
+import { ImageViewer } from "./ImageViewer"
+import { MediaViewer } from "./MediaViewer"
+import { PDFViewer } from "./PDFViewer"
+import { BinaryFileViewer } from "./BinaryFileViewer"
 
 interface FileViewerProps {
   filePath: string
+  threadId: string
 }
 
-export function FileViewer({ filePath }: FileViewerProps) {
-  const { currentThreadId, fileContents, setFileContents } = useAppStore()
+export function FileViewer({ filePath, threadId }: FileViewerProps): React.JSX.Element | null {
+  const { fileContents, setFileContents } = useCurrentThread(threadId)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [binaryContent, setBinaryContent] = useState<string | null>(null)
   const [fileSize, setFileSize] = useState<number | undefined>()
 
   // Get file type info
-  const fileName = filePath.split('/').pop() || filePath
+  const fileName = filePath.split("/").pop() || filePath
   const fileTypeInfo = useMemo(() => getFileType(fileName), [fileName])
   const isBinary = useMemo(() => isBinaryFile(fileName), [fileName])
 
@@ -36,12 +37,7 @@ export function FileViewer({ filePath }: FileViewerProps) {
 
   // Load file content (text or binary depending on file type)
   useEffect(() => {
-    async function loadFile() {
-      if (!currentThreadId) {
-        setError('No thread selected')
-        return
-      }
-
+    async function loadFile(): Promise<void> {
       // Skip if already loaded
       if (content !== undefined || binaryContent !== null) {
         return
@@ -53,32 +49,32 @@ export function FileViewer({ filePath }: FileViewerProps) {
       try {
         if (isBinary) {
           // Read as binary file (base64)
-          const result = await window.api.workspace.readBinaryFile(currentThreadId, filePath)
+          const result = await window.api.workspace.readBinaryFile(threadId, filePath)
           if (result.success && result.content !== undefined) {
             setBinaryContent(result.content)
             setFileSize(result.size)
           } else {
-            setError(result.error || 'Failed to read file')
+            setError(result.error || "Failed to read file")
           }
         } else {
           // Read as text file
-          const result = await window.api.workspace.readFile(currentThreadId, filePath)
+          const result = await window.api.workspace.readFile(threadId, filePath)
           if (result.success && result.content !== undefined) {
             setFileContents(filePath, result.content)
             setFileSize(result.size)
           } else {
-            setError(result.error || 'Failed to read file')
+            setError(result.error || "Failed to read file")
           }
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to read file')
+        setError(e instanceof Error ? e.message : "Failed to read file")
       } finally {
         setIsLoading(false)
       }
     }
 
     loadFile()
-  }, [currentThreadId, filePath, content, binaryContent, setFileContents, isBinary])
+  }, [threadId, filePath, content, binaryContent, setFileContents, isBinary])
 
   if (isLoading) {
     return (
@@ -111,43 +107,43 @@ export function FileViewer({ filePath }: FileViewerProps) {
   }
 
   // Route to appropriate viewer based on file type
-  if (fileTypeInfo.type === 'image' && binaryContent) {
+  if (fileTypeInfo.type === "image" && binaryContent) {
     return (
-      <ImageViewer 
-        filePath={filePath} 
-        base64Content={binaryContent} 
-        mimeType={fileTypeInfo.mimeType || 'image/png'}
+      <ImageViewer
+        filePath={filePath}
+        base64Content={binaryContent}
+        mimeType={fileTypeInfo.mimeType || "image/png"}
       />
     )
   }
 
-  if (fileTypeInfo.type === 'video' && binaryContent) {
+  if (fileTypeInfo.type === "video" && binaryContent) {
     return (
-      <MediaViewer 
-        filePath={filePath} 
-        base64Content={binaryContent} 
-        mimeType={fileTypeInfo.mimeType || 'video/mp4'}
+      <MediaViewer
+        filePath={filePath}
+        base64Content={binaryContent}
+        mimeType={fileTypeInfo.mimeType || "video/mp4"}
         mediaType="video"
       />
     )
   }
 
-  if (fileTypeInfo.type === 'audio' && binaryContent) {
+  if (fileTypeInfo.type === "audio" && binaryContent) {
     return (
-      <MediaViewer 
-        filePath={filePath} 
-        base64Content={binaryContent} 
-        mimeType={fileTypeInfo.mimeType || 'audio/mpeg'}
+      <MediaViewer
+        filePath={filePath}
+        base64Content={binaryContent}
+        mimeType={fileTypeInfo.mimeType || "audio/mpeg"}
         mediaType="audio"
       />
     )
   }
 
-  if (fileTypeInfo.type === 'pdf' && binaryContent) {
+  if (fileTypeInfo.type === "pdf" && binaryContent) {
     return <PDFViewer filePath={filePath} base64Content={binaryContent} />
   }
 
-  if (fileTypeInfo.type === 'binary') {
+  if (fileTypeInfo.type === "binary") {
     return <BinaryFileViewer filePath={filePath} size={fileSize} />
   }
 

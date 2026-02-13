@@ -1,19 +1,19 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { createDeepAgent } from 'deepagents'
-import { getDefaultModel, getModelConfigById } from '../ipc/models'
-import { getApiKey, getCheckpointDbPath, getAzureConfig } from '../storage'
-import { ChatAnthropic } from '@langchain/anthropic'
-import { ChatOpenAI, AzureChatOpenAI } from '@langchain/openai'
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai'
-import { SqlJsSaver } from '../checkpointer/sqljs-saver'
-import { LocalSandbox } from './local-sandbox'
+import { createDeepAgent } from "deepagents"
+import { getDefaultModel, getModelConfigById } from "../ipc/models"
+import { getApiKey, getThreadCheckpointPath, getAzureConfig } from "../storage"
+import { ChatAnthropic } from "@langchain/anthropic"
+import { ChatOpenAI, AzureChatOpenAI } from "@langchain/openai"
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai"
+import { SqlJsSaver } from "../checkpointer/sqljs-saver"
+import { LocalSandbox } from "./local-sandbox"
 
-import type * as _lcTypes from 'langchain'
-import type * as _lcMessages from '@langchain/core/messages'
-import type * as _lcLanggraph from '@langchain/langgraph'
-import type * as _lcZodTypes from '@langchain/core/utils/types'
+import type * as _lcTypes from "langchain"
+import type * as _lcMessages from "@langchain/core/messages"
+import type * as _lcLanggraph from "@langchain/langgraph"
+import type * as _lcZodTypes from "@langchain/core/utils/types"
 
-import { BASE_SYSTEM_PROMPT } from './system-prompt'
+import { BASE_SYSTEM_PROMPT } from "./system-prompt"
 
 /**
  * Generate the full system prompt for the agent.
@@ -36,38 +36,51 @@ function getSystemPrompt(workspacePath: string): string {
   return workingDirSection + BASE_SYSTEM_PROMPT
 }
 
-// Singleton checkpointer instance
-let checkpointer: SqlJsSaver | null = null
+// Per-thread checkpointer cache
+const checkpointers = new Map<string, SqlJsSaver>()
 
-export async function getCheckpointer(): Promise<SqlJsSaver> {
+export async function getCheckpointer(threadId: string): Promise<SqlJsSaver> {
+  let checkpointer = checkpointers.get(threadId)
   if (!checkpointer) {
-    checkpointer = new SqlJsSaver(getCheckpointDbPath())
+    const dbPath = getThreadCheckpointPath(threadId)
+    checkpointer = new SqlJsSaver(dbPath)
     await checkpointer.initialize()
+    checkpointers.set(threadId, checkpointer)
   }
   return checkpointer
 }
 
+export async function closeCheckpointer(threadId: string): Promise<void> {
+  const checkpointer = checkpointers.get(threadId)
+  if (checkpointer) {
+    await checkpointer.close()
+    checkpointers.delete(threadId)
+  }
+}
+
 // Get the appropriate model instance based on configuration
-function getModelInstance(modelId?: string): ChatAnthropic | ChatOpenAI | ChatGoogleGenerativeAI | AzureChatOpenAI | string {
+function getModelInstance(
+  modelId?: string
+): ChatAnthropic | ChatOpenAI | ChatGoogleGenerativeAI | AzureChatOpenAI | string {
   const selectedModelId = modelId || getDefaultModel()
-  console.log('[Runtime] Using model:', selectedModelId)
+  console.log("[Runtime] Using model:", selectedModelId)
 
   const selectedModel = getModelConfigById(selectedModelId)
   const provider = selectedModel?.provider
   const model = selectedModel?.model ?? selectedModelId
 
-  if (provider === 'azure') {
-    const apiKey = getApiKey('azure')
+  if (provider === "azure") {
+    const apiKey = getApiKey("azure")
     const azureConfig = getAzureConfig()
     
-    console.log('[Runtime] Azure API key present:', !!apiKey)
-    console.log('[Runtime] Azure config present:', !!azureConfig)
+    console.log("[Runtime] Azure API key present:", !!apiKey)
+    console.log("[Runtime] Azure config present:", !!azureConfig)
     
     if (!apiKey) {
-      throw new Error('Azure OpenAI API key not configured')
+      throw new Error("Azure OpenAI API key not configured")
     }
     if (!azureConfig) {
-      throw new Error('Azure OpenAI configuration incomplete (missing endpoint, deployment, or apiVersion)')
+      throw new Error("Azure OpenAI configuration incomplete (missing endpoint, deployment, or apiVersion)")
     }
     
     return new AzureChatOpenAI({
@@ -80,36 +93,36 @@ function getModelInstance(modelId?: string): ChatAnthropic | ChatOpenAI | ChatGo
   }
 
   // Keep existing routing behavior for non-Azure providers (prefix-based)
-  if (model.startsWith('claude')) {
-    const apiKey = getApiKey('anthropic')
-    console.log('[Runtime] Anthropic API key present:', !!apiKey)
+  if (model.startsWith("claude")) {
+    const apiKey = getApiKey("anthropic")
+    console.log("[Runtime] Anthropic API key present:", !!apiKey)
     if (!apiKey) {
-      throw new Error('Anthropic API key not configured')
+      throw new Error("Anthropic API key not configured")
     }
     return new ChatAnthropic({
       model,
       anthropicApiKey: apiKey
     })
   } else if (
-    model.startsWith('gpt') ||
-    model.startsWith('o1') ||
-    model.startsWith('o3') ||
-    model.startsWith('o4')
+    model.startsWith("gpt") ||
+    model.startsWith("o1") ||
+    model.startsWith("o3") ||
+    model.startsWith("o4")
   ) {
-    const apiKey = getApiKey('openai')
-    console.log('[Runtime] OpenAI API key present:', !!apiKey)
+    const apiKey = getApiKey("openai")
+    console.log("[Runtime] OpenAI API key present:", !!apiKey)
     if (!apiKey) {
-      throw new Error('OpenAI API key not configured')
+      throw new Error("OpenAI API key not configured")
     }
     return new ChatOpenAI({
       model,
       openAIApiKey: apiKey
     })
-  } else if (model.startsWith('gemini')) {
-    const apiKey = getApiKey('google')
-    console.log('[Runtime] Google API key present:', !!apiKey)
+  } else if (model.startsWith("gemini")) {
+    const apiKey = getApiKey("google")
+    console.log("[Runtime] Google API key present:", !!apiKey)
     if (!apiKey) {
-      throw new Error('Google API key not configured')
+      throw new Error("Google API key not configured")
     }
     return new ChatGoogleGenerativeAI({
       model,
@@ -122,6 +135,8 @@ function getModelInstance(modelId?: string): ChatAnthropic | ChatOpenAI | ChatGo
 }
 
 export interface CreateAgentRuntimeOptions {
+  /** Thread ID - REQUIRED for per-thread checkpointing */
+  threadId: string
   /** Model ID to use (defaults to configured default model) */
   modelId?: string
   /** Workspace path - REQUIRED for agent to operate on files */
@@ -131,24 +146,28 @@ export interface CreateAgentRuntimeOptions {
 // Create agent runtime with configured model and checkpointer
 export type AgentRuntime = ReturnType<typeof createDeepAgent>
 
-// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export async function createAgentRuntime(options: CreateAgentRuntimeOptions) {
-  const { modelId, workspacePath } = options
+  const { threadId, modelId, workspacePath } = options
+
+  if (!threadId) {
+    throw new Error("Thread ID is required for checkpointing.")
+  }
 
   if (!workspacePath) {
     throw new Error(
-      'Workspace path is required. Please select a workspace folder before running the agent.'
+      "Workspace path is required. Please select a workspace folder before running the agent."
     )
   }
 
-  console.log('[Runtime] Creating agent runtime...')
-  console.log('[Runtime] Workspace path:', workspacePath)
+  console.log("[Runtime] Creating agent runtime...")
+  console.log("[Runtime] Thread ID:", threadId)
+  console.log("[Runtime] Workspace path:", workspacePath)
 
   const model = getModelInstance(modelId)
-  console.log('[Runtime] Model instance created:', typeof model)
+  console.log("[Runtime] Model instance created:", typeof model)
 
-  const checkpointer = await getCheckpointer()
-  console.log('[Runtime] Checkpointer ready')
+  const checkpointer = await getCheckpointer(threadId)
+  console.log("[Runtime] Checkpointer ready for thread:", threadId)
 
   const backend = new LocalSandbox({
     rootDir: workspacePath,
@@ -182,16 +201,15 @@ The workspace root is: ${workspacePath}`
     interruptOn: { execute: true }
   } as Parameters<typeof createDeepAgent>[0])
 
-  console.log('[Runtime] Deep agent created with LocalSandbox at:', workspacePath)
+  console.log("[Runtime] Deep agent created with LocalSandbox at:", workspacePath)
   return agent
 }
 
 export type DeepAgent = ReturnType<typeof createDeepAgent>
 
-// Clean up resources
+// Clean up all checkpointer resources
 export async function closeRuntime(): Promise<void> {
-  if (checkpointer) {
-    await checkpointer.close()
-    checkpointer = null
-  }
+  const closePromises = Array.from(checkpointers.values()).map((cp) => cp.close())
+  await Promise.all(closePromises)
+  checkpointers.clear()
 }

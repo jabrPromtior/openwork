@@ -1,18 +1,18 @@
-import { useAppStore } from '@/lib/store'
-import { TabBar } from './TabBar'
-import { FileViewer } from './FileViewer'
-import { ChatContainer } from '@/components/chat/ChatContainer'
+import { useCurrentThread } from "@/lib/thread-context"
+import { TabBar } from "./TabBar"
+import { FileViewer } from "./FileViewer"
+import { ChatContainer } from "@/components/chat/ChatContainer"
 
 interface TabbedPanelProps {
   threadId: string
   showTabBar?: boolean
 }
 
-export function TabbedPanel({ threadId, showTabBar = true }: TabbedPanelProps) {
-  const { activeTab, openFiles } = useAppStore()
+export function TabbedPanel({ threadId, showTabBar = true }: TabbedPanelProps): React.JSX.Element {
+  const { activeTab, openFiles } = useCurrentThread(threadId)
 
   // Determine what to render based on active tab
-  const isAgentTab = activeTab === 'agent'
+  const isAgentTab = activeTab === "agent"
   const activeFile = openFiles.find((f) => f.path === activeTab)
 
   return (
@@ -29,7 +29,7 @@ export function TabbedPanel({ threadId, showTabBar = true }: TabbedPanelProps) {
           <ChatContainer threadId={threadId} />
         ) : activeFile ? (
           // Use key to force remount when file changes, ensuring fresh state
-          <FileViewer key={activeFile.path} filePath={activeFile.path} />
+          <FileViewer key={activeFile.path} filePath={activeFile.path} threadId={threadId} />
         ) : (
           // Fallback - shouldn't happen but just in case
           <div className="flex flex-1 items-center justify-center text-muted-foreground">
